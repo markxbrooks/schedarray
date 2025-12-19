@@ -1,0 +1,15 @@
+# Sphinx build output
+_build/
+*.pyc
+*.pyo
+
+# Sphinx cache
+.sphinx/
+
+# Python cache
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+
