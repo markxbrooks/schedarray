@@ -142,11 +142,14 @@ class SchedulerService:
                             if 'schedarray' in cmdline_str and 'service' in cmdline_str and 'start' in cmdline_str:
                                 # Found the service process - check it's actually running
                                 if proc.is_running():
+                                    log.debug(f"Found running schedarray service process: PID {proc.pid}")
                                     return True
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
+                log.debug("No running schedarray service process found via psutil")
             except ImportError:
                 # psutil not available, try using pgrep (Unix-like systems)
+                log.debug("psutil not available, trying pgrep")
                 try:
                     result = subprocess.run(
                         ['pgrep', '-f', 'schedarray.*service.*start'],
@@ -160,13 +163,16 @@ class SchedulerService:
                             try:
                                 # Check if process exists (kill -0 doesn't actually kill)
                                 subprocess.run(['kill', '-0', pid], timeout=1, capture_output=True)
+                                log.debug(f"Found running schedarray service process via pgrep: PID {pid}")
                                 return True
                             except (subprocess.TimeoutExpired, FileNotFoundError):
                                 continue
-                except (FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
+                    log.debug("No running schedarray service process found via pgrep")
+                except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+                    log.debug(f"pgrep failed: {e}")
             
             # Fallback: if self.running is True, trust it (only for the actual running instance)
+            log.debug(f"Falling back to self.running={self.running}")
             return self.running
         except Exception as e:
             log.warning(f"Error checking service process status: {e}")
