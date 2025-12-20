@@ -109,11 +109,69 @@ class SchedulerService:
         worker_status = self.worker_pool.get_worker_status()
         job_counts = self.scheduler.get_job_count_by_state()
 
+        # Check if service is actually running by looking for the process
+        # This is more reliable than self.running which is always False for new instances
+        service_running = self._check_service_process_running()
+
         return {
-            "running": self.running,
+            "running": service_running,
             "workers": worker_status,
             "jobs": job_counts,
         }
+    
+    def _check_service_process_running(self) -> bool:
+        """
+        Check if the scheduler service process is actually running.
+        
+        This checks for running processes with 'schedarray service start' in the command line,
+        which is more reliable than checking self.running (which is always False for new instances).
+        
+        :return: True if service process is running, False otherwise
+        """
+        import subprocess
+        
+        try:
+            # Try using psutil if available (most reliable)
+            try:
+                import psutil
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        cmdline = proc.info.get('cmdline', [])
+                        if cmdline and len(cmdline) >= 3:
+                            cmdline_str = ' '.join(cmdline).lower()
+                            if 'schedarray' in cmdline_str and 'service' in cmdline_str and 'start' in cmdline_str:
+                                # Found the service process - check it's actually running
+                                if proc.is_running():
+                                    return True
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+            except ImportError:
+                # psutil not available, try using pgrep (Unix-like systems)
+                try:
+                    result = subprocess.run(
+                        ['pgrep', '-f', 'schedarray.*service.*start'],
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        # Verify the process is still running
+                        pids = result.stdout.strip().split()
+                        for pid in pids:
+                            try:
+                                # Check if process exists (kill -0 doesn't actually kill)
+                                subprocess.run(['kill', '-0', pid], timeout=1, capture_output=True)
+                                return True
+                            except (subprocess.TimeoutExpired, FileNotFoundError):
+                                continue
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+            
+            # Fallback: if self.running is True, trust it (only for the actual running instance)
+            return self.running
+        except Exception as e:
+            log.warning(f"Error checking service process status: {e}")
+            # Fallback to self.running if process check fails
+            return self.running
 
 def main():
     """Main entry point for the service."""
@@ -157,9 +215,11 @@ def main():
     elif args.command == "status":
         status = service.status()
         print("Scheduler Service Status:")
-        print(f"  Running: {status['running']}")
-        print(f"  Workers: {status['workers']['total_workers']}")
-        print(f"  Jobs by state: {status['jobs']}")
+        print(f"Service running: {status['running']}")
+        print(f"Workers: {status['workers']['total_workers']}")
+        print(f"Jobs by state:")
+        for state, count in status['jobs'].items():
+            print(f"  {state}: {count}")
 
 if __name__ == "__main__":
     main()
